@@ -1,0 +1,417 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tic Tac Toe - No Code</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.9/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <style>
+    body { font-family: 'Arial', sans-serif; }
+    .game-container { max-width: 800px; margin: 0 auto; padding: 1rem; }
+    .board-grid { display: grid; gap: 5px; width: fit-content; margin: 0 auto; }
+    .cell { display: flex; justify-content: center; align-items: center; font-size: 2rem; cursor: pointer; transition: transform 0.2s; }
+    .cell:hover { transform: scale(1.1); }
+    .winning-cell { background-color: rgba(34, 197, 94, 0.3); }
+    .config-panel { transition: max-height 0.3s ease-in-out; overflow: hidden; }
+    .config-panel-closed { max-height: 0; }
+    .theme-light { background: #f3f4f6; color: #1f2937; }
+    .theme-dark { background: #1f2937; color: #f3f4f6; }
+    .theme-retro { background: #000; color: #0f0; font-family: 'Courier New', monospace; }
+    .theme-retro .cell { border: 2px solid #0f0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const TicTacToe = () => {
+      const [boardSize, setBoardSize] = useState(3);
+      const [board, setBoard] = useState(Array(9).fill(null));
+      const [currentPlayer, setCurrentPlayer] = useState('X');
+      const [gameMode, setGameMode] = useState('pvp');
+      const [playerNames, setPlayerNames] = useState({ X: 'Player X', O: 'Player O' });
+      const [playerIcons, setPlayerIcons] = useState({ X: 'X', O: 'O' });
+      const [winner, setWinner] = useState(null);
+      const [isDraw, setIsDraw] = useState(false);
+      const [theme, setTheme] = useState('light');
+      const [soundOn, setSoundOn] = useState(true);
+      const [animationsOn, setAnimationsOn] = useState(true);
+      const [timedMode, setTimedMode] = useState(false);
+      const [timeLeft, setTimeLeft] = useState(10);
+      const [matchHistory, setMatchHistory] = useState([]);
+      const [showConfig, setShowConfig] = useState(false);
+      const [customBackground, setCustomBackground] = useState('');
+
+      useEffect(() => {
+        try {
+          const savedHistory = localStorage.getItem('ticTacToeHistory');
+          if (savedHistory) setMatchHistory(JSON.parse(savedHistory));
+        } catch (e) {
+          console.error('Error loading match history:', e);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (timedMode && !winner && !isDraw) {
+          const timer = setInterval(() => {
+            setTimeLeft((prev) => {
+              if (prev <= 1) {
+                handleTimeOut();
+                return 10;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+          return () => clearInterval(timer);
+        }
+      }, [timedMode, currentPlayer, winner, isDraw]);
+
+      useEffect(() => {
+        if (gameMode === 'ai' && currentPlayer === 'O' && !winner && !isDraw) {
+          setTimeout(makeAIMove, 500);
+        }
+      }, [currentPlayer, gameMode, winner, isDraw]);
+
+      const initializeBoard = (size) => {
+        setBoardSize(size);
+        setBoard(Array(size * size).fill(null));
+        setWinner(null);
+        setIsDraw(false);
+        setCurrentPlayer('X');
+        setTimeLeft(10);
+      };
+
+      const checkWin = (board, size) => {
+        const lines = [];
+        for (let i = 0; i < size; i++) {
+          lines.push(Array.from({ length: size }, (_, j) => i * size + j));
+        }
+        for (let i = 0; i < size; i++) {
+          lines.push(Array.from({ length: size }, (_, j) => j * size + i));
+        }
+        lines.push(Array.from({ length: size }, (_, i) => i * size + i));
+        lines.push(Array.from({ length: size }, (_, i) => (i + 1) * (size - 1)));
+
+        for (const line of lines) {
+          const symbols = line.map((index) => board[index]);
+          if (symbols.every((s) => s === 'X') || symbols.every((s) => s === 'O')) {
+            return { player: symbols[0], line };
+          }
+        }
+
+        if (board.every((cell) => cell !== null)) setIsDraw(true);
+        return null;
+      };
+
+      const handleClick = (index) => {
+        if (board[index] || winner || isDraw) return;
+
+        const newBoard = [...board];
+        newBoard[index] = currentPlayer;
+        setBoard(newBoard);
+
+        if (soundOn) {
+          try {
+            const audio = new Audio('https://www.soundjay.com/buttons/button-09.mp3');
+            audio.play().catch((e) => console.error('Audio playback failed:', e));
+          } catch (e) {
+            console.error('Error playing sound:', e);
+          }
+        }
+
+        const winResult = checkWin(newBoard, boardSize);
+        if (winResult) {
+          setWinner(winResult);
+          if (animationsOn) {
+            window.confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          }
+          const newHistory = [...matchHistory, { winner: playerNames[winResult.player], date: new Date().toLocaleString(), boardSize }];
+          setMatchHistory(newHistory);
+          try {
+            localStorage.setItem('ticTacToeHistory', JSON.stringify(newHistory));
+          } catch (e) {
+            console.error('Error saving match history:', e);
+          }
+          return;
+        }
+
+        setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
+        setTimeLeft(10);
+      };
+
+      const makeAIMove = () => {
+        const emptyCells = board.reduce((acc, cell, idx) => (cell === null ? [...acc, idx] : acc), []);
+        if (emptyCells.length === 0) return;
+
+        const randomIndex = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+        handleClick(randomIndex);
+      };
+
+      const handleTimeOut = () => {
+        setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
+        setTimeLeft(10);
+      };
+
+      const shareResult = () => {
+        const grid = Array(boardSize).fill().map((_, i) =>
+          board.slice(i * boardSize, (i + 1) * boardSize)
+            .map((cell) => (cell ? playerIcons[cell] : '⬜')).join('')
+        ).join('\n');
+        const text = `Tic Tac Toe Result!\n${playerNames.X} vs ${playerNames.O}\n${grid}\n${winner ? `${playerNames[winner.player]} wins!` : isDraw ? 'Draw!' : 'Ongoing'}`;
+        try {
+          navigator.clipboard.writeText(text);
+          alert('Game result copied to clipboard!');
+        } catch (e) {
+          console.error('Clipboard copy failed:', e);
+          alert('Failed to copy result. Please try again.');
+        }
+      };
+
+      const exportSettings = () => {
+        const settings = { boardSize, playerNames, playerIcons, theme, soundOn, animationsOn, timedMode };
+        const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tic-tac-toe-settings.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const importSettings = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const settings = JSON.parse(ev.target.result);
+            setBoardSize(settings.boardSize || 3);
+            setPlayerNames(settings.playerNames || { X: 'Player X', O: 'Player O' });
+            setPlayerIcons(settings.playerIcons || { X: 'X', O: 'O' });
+            setTheme(settings.theme || 'light');
+            setSoundOn(settings.soundOn !== undefined ? settings.soundOn : true);
+            setAnimationsOn(settings.animationsOn !== undefined ? settings.animationsOn : true);
+            setTimedMode(settings.timedMode || false);
+            initializeBoard(settings.boardSize || 3);
+          } catch (e) {
+            console.error('Error importing settings:', e);
+            alert('Invalid settings file.');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const handleBackgroundUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (ev) => setCustomBackground(ev.target.result);
+          reader.readAsDataURL(file);
+        }
+      };
+
+      return (
+        <div className={`game-container ${theme === 'light' ? 'theme-light' : theme === 'dark' ? 'theme-dark' : 'theme-retro'}`} style={{ backgroundImage: customBackground ? `url(${customBackground})` : 'none', backgroundSize: 'cover' }}>
+          <h1 className="text-3xl font-bold text-center mb-4">Tic Tac Toe</h1>
+          <div className="text-center mb-4">
+            <p>{playerNames[currentPlayer]}'s Turn ({playerIcons[currentPlayer]})</p>
+            {timedMode && <p>Time Left: {timeLeft}s</p>}
+            {winner && <p className="text-green-500 font-bold">{playerNames[winner.player]} Wins!</p>}
+            {isDraw && <p className="text-yellow-500 font-bold">Draw!</p>}
+          </div>
+          <div
+            className={`board-grid ${animationsOn ? 'animate-pulse' : ''}`}
+            style={{
+              gridTemplateColumns: `repeat(${boardSize}, minmax(0, 1fr))`,
+              width: boardSize === 3 ? '300px' : boardSize === 4 ? '400px' : '500px',
+            }}
+          >
+            {board.map((cell, index) => (
+              <div
+                key={index}
+                className={`cell h-20 border ${winner && winner.line.includes(index) ? 'winning-cell' : ''}`}
+                onClick={() => handleClick(index)}
+              >
+                {cell ? playerIcons[cell] : ''}
+              </div>
+            ))}
+          </div>
+          <div className="text-center mt-4 space-x-2">
+            <button className="bg-blue-500 text-white px-4 py-2 rounded" onClick={() => initializeBoard(boardSize)}>
+              Reset Game
+            </button>
+            <button className="bg-green-500 text-white px-4 py-2 rounded" onClick={shareResult}>
+              Share Result
+            </button>
+            <button className="bg-purple-500 text-white px-4 py-2 rounded" onClick={() => setShowConfig(!showConfig)}>
+              {showConfig ? 'Hide Config' : 'Show Config'}
+            </button>
+          </div>
+          <div className={`config-panel ${showConfig ? '' : 'config-panel-closed'}`}>
+            <div className="mt-4 p-4 bg-gray-100 rounded">
+              <h2 className="text-xl font-bold mb-2">Game Settings</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block">Player X Name:</label>
+                  <input
+                    type="text"
+                    className="border p-2 w-full"
+                    value={playerNames.X}
+                    onChange={(e) => setPlayerNames({ ...playerNames, X: e.target.value })}
+                  />
+                  <label className="block mt-2">Player X Icon:</label>
+                  <input
+                    type="text"
+                    className="border p-2 w-full"
+                    value={playerIcons.X}
+                    onChange={(e) => setPlayerIcons({ ...playerIcons, X: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block">Player O Name:</label>
+                  <input
+                    type="text"
+                    className="border p-2 w-full"
+                    value={playerNames.O}
+                    onChange={(e) => setPlayerNames({ ...playerNames, O: e.target.value })}
+                  />
+                  <label className="block mt-2">Player O Icon:</label>
+                  <input
+                    type="text"
+                    className="border p-2 w-full"
+                    value={playerIcons.O}
+                    onChange={(e) => setPlayerIcons({ ...playerIcons, O: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <label className="block">Board Size:</label>
+                <select
+                  className="border p-2"
+                  value={boardSize}
+                  onChange={(e) => initializeBoard(parseInt(e.target.value))}
+                >
+                  <option value="3">3x3</option>
+                  <option value="4">4x4</option>
+                  <option value="5">5x5</option>
+                </select>
+              </div>
+              <div className="mt-4">
+                <label className="block">Game Mode:</label>
+                <select className="border p-2" value={gameMode} onChange={(e) => setGameMode(e.target.value)}>
+                  <option value="pvp">Player vs Player</option>
+                  <option value="ai">Player vs AI</option>
+                </select>
+              </div>
+              <div className="mt-4 flex space-x-4">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={soundOn}
+                    onChange={() => setSoundOn(!soundOn)}
+                  />
+                  Sound Effects
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={animationsOn}
+                    onChange={() => setAnimationsOn(!animationsOn)}
+                  />
+                  Animations
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={timedMode}
+                    onChange={() => setTimedMode(!timedMode)}
+                  />
+                  Timed Mode (10s/turn)
+                </label>
+              </div>
+              <div className="mt-4">
+                <label className="block">Theme:</label>
+                <select className="border p-2" value={theme} onChange={(e) => setTheme(e.target.value)}>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="retro">Retro Arcade</option>
+                </select>
+              </div>
+              <div className="mt-4">
+                <label className="block">Custom Background:</label>
+                <input type="file" accept="image/*" onChange={handleBackgroundUpload} />
+              </div>
+              <div className="mt-4 space-x-2">
+                <button className="bg-blue-500 text-white px-4 py-2 rounded" onClick={exportSettings}>
+                  Export Settings
+                </button>
+                <label className="bg-blue-500 text-white px-4 py-2 rounded inline-block cursor-pointer">
+                  Import Settings
+                  <input type="file" accept=".json" onChange={importSettings} className="hidden" />
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4">
+            <h2 className="text-xl font-bold">Match History</h2>
+            <ul className="list-disc pl-5">
+              {matchHistory.map((match, idx) => (
+                <li key={idx}>
+                  {match.date}: {match.winner} won on {match.boardSize}x{match.boardSize} board
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<TicTacToe />);
+  </script>
+</body>
+</html>
